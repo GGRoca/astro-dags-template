@@ -18,7 +18,8 @@ def generate_query_url(logical_date) -> str:
     date_str = logical_date.strftime('%Y%m%d')
     return (
         "https://api.fda.gov/drug/event.json"
-        f"?search=patient.drug.activesubstance.name:%22acetaminophen%22"
+        # CORREÇÃO: Usando o campo 'medicinalproduct' que sabemos que tem dados
+        f"?search=patient.drug.medicinalproduct:%22acetaminophen%22"
         f"+AND+receivedate:[{date_str}+TO+{date_str}]"
     )
 
@@ -38,11 +39,16 @@ def fetch_openfda_data() -> dict | None:
     try:
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
-        # A API com ?search= (sem &count=) retorna o total no campo 'total' dos metadados
         total_events = resp.json().get("meta", {}).get("results", {}).get("total", 0)
     except requests.RequestException as e:
-        print(f"OpenFDA request failed: {e}")
-        return None
+        # Se a API retornar "NOT_FOUND", a biblioteca 'requests' pode não considerá-lo um erro de status.
+        # Precisamos verificar se a resposta contém a chave 'error'.
+        if resp and "error" in resp.json():
+            print(f"API returned 'not found' for {logical_date.strftime('%Y-%m-%d')}.")
+            total_events = 0
+        else:
+            print(f"OpenFDA request failed: {e}")
+            return None
 
     if total_events == 0:
         print(f"No events found for {logical_date.strftime('%Y-%m-%d')}.")
@@ -57,8 +63,7 @@ def fetch_openfda_data() -> dict | None:
 @task
 def save_to_bigquery(data: dict | None) -> None:
     """
-    Salva um único registro (dicionário) em uma tabela do BigQuery,
-    reutilizando a lógica do projeto anterior.
+    Salva um único registro (dicionário) em uma tabela do BigQuery.
     """
     if not data:
         print("No data to write to BigQuery.")
@@ -66,9 +71,7 @@ def save_to_bigquery(data: dict | None) -> None:
 
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     
-    # Converte o dicionário em um DataFrame de uma única linha
     df = pd.DataFrame([data])
-    # Garante que a coluna de data seja do tipo datetime para o to_gbq
     df['report_date'] = pd.to_datetime(df['report_date'])
 
     bq_hook = BigQueryHook(gcp_conn_id=GCP_CONN_ID, use_legacy_sql=False)
@@ -90,7 +93,6 @@ def save_to_bigquery(data: dict | None) -> None:
     print(f"Loaded 1 row to {GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE}")
 
 
-# Argumentos padrão para a DAG
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
@@ -103,13 +105,12 @@ default_args = {
     description="ETL diário de eventos do OpenFDA para Acetaminophen para o BigQuery",
     default_args=default_args,
     schedule="@daily",
-    start_date=datetime(2025, 9, 1),
-    catchup=False, # Comece com False para facilitar os testes
+    start_date=datetime(2023, 1, 1),
+    catchup=False,
     tags=["openfda", "bigquery", "tylenol"],
 )
 def openfda_etl_dag():
     event_data = fetch_openfda_data()
     save_to_bigquery(event_data)
 
-# Instancia a DAG para que o Airflow a reconheça
 dag = openfda_etl_dag()
