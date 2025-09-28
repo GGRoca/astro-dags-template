@@ -8,8 +8,8 @@ import pandas as pd
 
 # ----------------------- Configurações -----------------------
 GCP_PROJECT = "enap-aula1-cd"
-BQ_DATASET = "openfda_events"
-BQ_TABLE = "acetaminophen_daily"   # tabela final (particionada por report_date)
+BQ_DATASET = "FDA_API"                 # << mudou para o novo dataset
+BQ_TABLE = "acetaminophen_daily"       # tabela final (sem partição)
 GCP_CONN_ID = "google_cloud_default"
 
 # Backfill inicial
@@ -40,7 +40,7 @@ def build_url(start_date: datetime, end_date: datetime) -> str:
 # ----------------------- Tasks -----------------------
 @task
 def ensure_table() -> None:
-    """Cria a tabela particionada por report_date se ainda não existir (sem staging)."""
+    """Cria a tabela (SEM partição) se ainda não existir."""
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     bq = BigQueryHook(gcp_conn_id=GCP_CONN_ID, use_legacy_sql=False)
     client = bq.get_client(project_id=GCP_PROJECT)
@@ -49,7 +49,6 @@ def ensure_table() -> None:
       report_date DATE,
       event_count INT64
     )
-    PARTITION BY report_date
     """
     client.query(ddl).result()
 
@@ -111,7 +110,7 @@ def fetch_openfda_data(dr: dict) -> list[dict]:
 
 @task
 def save_to_bigquery(rows: list[dict]) -> None:
-    """Append simples na tabela final (particionada por report_date)."""
+    """Append simples na tabela final (sem partição)."""
     if not rows:
         print("Nada novo para gravar.")
         return
@@ -127,10 +126,6 @@ def save_to_bigquery(rows: list[dict]) -> None:
         project_id=GCP_PROJECT,
         if_exists="append",
         credentials=credentials,
-        table_schema=[
-            {"name": "report_date", "type": "DATE"},
-            {"name": "event_count", "type": "INTEGER"},
-        ],
         progress_bar=False,
     )
     print(f"[BigQuery] Gravadas {len(df)} linhas em {GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE}")
