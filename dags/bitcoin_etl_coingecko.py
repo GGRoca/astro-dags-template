@@ -1,6 +1,6 @@
 # dags/bitcoin_etl_coingecko.py
 from __future__ import annotations
- 
+
 from airflow.decorators import dag, task
 from airflow.operators.python import get_current_context
 from datetime import timedelta
@@ -76,7 +76,7 @@ def fetch_bitcoin_history_from_coingecko():
     from airflow.providers.postgres.hooks.postgres import PostgresHook
     hook = PostgresHook(postgres_conn_id="postgres")
     engine = hook.get_sqlalchemy_engine()
-    df.to_sql("bitcoin_history_Guilherme", con=engine, if_exists="append", index=True)
+    df.to_sql("bitcoin_history_guilherme", con=engine, if_exists="append", index=True)
 
 
 @dag(
