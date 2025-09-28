@@ -58,7 +58,7 @@ def ensure_tables() -> None:
       report_date DATE,
       event_count INT64
     )
-    PARTITION BY DATE(report_date)
+    PARTITION BY report_date
     """
     client.query(ddl_final).result()
 
