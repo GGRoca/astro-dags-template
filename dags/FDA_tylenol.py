@@ -9,10 +9,11 @@ import pandas as pd
 # ----------------------- Configurações -----------------------
 GCP_PROJECT = "enap-aula1-cd"
 BQ_DATASET = "openfda_events"
-BQ_TABLE = "acetaminophen_daily"   # final, particionada por report_date
+BQ_TABLE = "acetaminophen_daily"   # tabela final (particionada por report_date)
 GCP_CONN_ID = "google_cloud_default"
 
-HIST_START = datetime(2024, 1, 1).date()  # backfill inicial
+# Backfill inicial
+HIST_START = datetime(2024, 1, 1).date()
 
 default_args = {
     "owner": "airflow",
@@ -23,23 +24,23 @@ default_args = {
 # ----------------------- Helpers -----------------------
 def build_url(start_date: datetime, end_date: datetime) -> str:
     """
-    Série diária no intervalo [start_date, end_date] (inclui ambas).
-    Usa medicinalproduct:"acetaminophen", que tem melhor cobertura.
+    Série diária no intervalo [start_date, end_date] (inclusive).
+    Usa medicinalproduct:acetaminophen (sem aspas) e count=receivedate (limit<=1000).
     """
     s = start_date.strftime("%Y%m%d")
     e = end_date.strftime("%Y%m%d")
     return (
         "https://api.fda.gov/drug/event.json"
-        "?search=patient.drug.medicinalproduct:%22acetaminophen%22"
+        "?search=patient.drug.medicinalproduct:acetaminophen"
         f"+AND+receivedate:[{s}+TO+{e}]"
         "&count=receivedate"
-        "&limit=10000"
+        "&limit=1000"
     )
 
 # ----------------------- Tasks -----------------------
 @task
 def ensure_table() -> None:
-    """Cria a tabela particionada por report_date se ainda não existir."""
+    """Cria a tabela particionada por report_date se ainda não existir (sem staging)."""
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
     bq = BigQueryHook(gcp_conn_id=GCP_CONN_ID, use_legacy_sql=False)
     client = bq.get_client(project_id=GCP_PROJECT)
@@ -55,10 +56,11 @@ def ensure_table() -> None:
 @task
 def compute_range() -> dict:
     """
-    Lê MAX(report_date); se vazio, começa em 2024-01-01.
-    Sempre encerra em (data_interval_end - 1 dia) para evitar dia parcial.
+    Lê MAX(report_date). Se vazio, começa em 2024-01-01.
+    Fecha em (data_interval_end - 1 dia) para evitar dia parcial.
     """
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+
     ctx = get_current_context()
     end_date = (ctx["data_interval_end"] - timedelta(days=1)).date()
 
@@ -109,7 +111,7 @@ def fetch_openfda_data(dr: dict) -> list[dict]:
 
 @task
 def save_to_bigquery(rows: list[dict]) -> None:
-    """Append simples (sem staging)."""
+    """Append simples na tabela final (particionada por report_date)."""
     if not rows:
         print("Nada novo para gravar.")
         return
@@ -140,7 +142,7 @@ def save_to_bigquery(rows: list[dict]) -> None:
     default_args=default_args,
     schedule="0 6 10 * *",   # roda no dia 10 de cada mês (06:00 UTC)
     start_date=datetime(2024, 1, 1),
-    catchup=False,           # backfill ocorre na 1ª execução via compute_range()
+    catchup=False,           # backfill acontece na 1ª execução via compute_range()
     tags=["openfda", "bigquery", "tylenol"],
 )
 def openfda_etl_dag():
