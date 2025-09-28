@@ -1,3 +1,20 @@
+from __future__ import annotations
+
+from airflow.decorators import dag, task
+from airflow.operators.python import get_current_context
+from datetime import timedelta
+import pendulum
+import requests
+import pandas as pd
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+
+DEFAULT_ARGS = {
+    "email_on_failure": True,
+    "owner": "Alex Lopes,Open in Cloud IDE",
+}
+
+
 @task
 def fetch_bitcoin_history_from_coingecko():
     """
@@ -6,8 +23,7 @@ def fetch_bitcoin_history_from_coingecko():
     """
     ctx = get_current_context()
 
-    # --- ALTERAÇÃO 1: Mudar a janela de tempo para 2 meses ---
-    # Em vez de buscar apenas "ontem", definimos um período fixo.
+    # --- LÓGICA TEMPORÁRIA: Mudar a janela de tempo para 2 meses ---
     end_time = pendulum.now("UTC")
     start_time = end_time.subtract(months=2)
 
@@ -23,7 +39,7 @@ def fetch_bitcoin_history_from_coingecko():
         "to": end_s,
     }
 
-    r = requests.get(url, params=params, timeout=60) # Aumentado o timeout para a chamada maior
+    r = requests.get(url, params=params, timeout=60) # Timeout aumentado
     r.raise_for_status()
     payload = r.json()
     
@@ -43,17 +59,31 @@ def fetch_bitcoin_history_from_coingecko():
 
     print(df.head(10).to_string())
 
-    from airflow.providers.postgres.hooks.postgres import PostgresHook
     hook = PostgresHook(postgres_conn_id="postgres")
 
-    # --- ALTERAÇÃO 2: Limpar a tabela antes de inserir os novos dados ---
-    # Este comando apaga todas as linhas, mas mantém a tabela.
+    # --- LÓGICA TEMPORÁRIA: Limpar a tabela antes de inserir ---
     table_name = "bitcoin_history_guilherme"
     print(f"Limpando dados antigos da tabela '{table_name}'...")
     hook.run(f"DELETE FROM {table_name};")
     print("Tabela limpa. Carregando novos dados...")
 
-    # Agora, o append vai inserir os dados na tabela vazia
     engine = hook.get_sqlalchemy_engine()
     df.to_sql(table_name, con=engine, if_exists="append", index=True)
     print(f"Carregados {len(df)} registros na tabela '{table_name}'.")
+
+
+@dag(
+    default_args=DEFAULT_ARGS,
+    schedule="0 0 * * *",  # diário à 00:00 UTC
+    start_date=pendulum.datetime(2025, 9, 17, tz="UTC"),
+    catchup=True,
+    owner_links={
+        "Alex Lopes": "mailto:alexlopespereira@gmail.com",
+        "Open in Cloud IDE": "https://cloud.astronomer.io/...",
+    },
+    tags=["bitcoin", "etl", "coingecko"],
+)
+def bitcoin_etl_coingecko():
+    fetch_bitcoin_history_from_coingecko()
+
+dag = bitcoin_etl_coingecko()
