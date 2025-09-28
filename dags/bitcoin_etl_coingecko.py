@@ -8,6 +8,17 @@ import requests
 import pandas as pd
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
+# --- DOCUMENTAÇÃO DO PROCESSO ---
+# NOTA HISTÓRICA: A carga inicial desta tabela foi realizada em 28/09/2025.
+# Foi utilizada uma versão temporária desta DAG para primeiro limpar a tabela com o comando DELETE
+# e para realizar um backfill de 2 meses de dados históricos da API CoinGecko.
+# Fiz isso pois a DAG iniical do projeto só pegava 2 dias de dados.
+#
+# Esta versão do código é a projetada para rodar diariamente
+# e anexar (append) apenas os dados do dia anterior, mantendo o histórico.
+# O parâmetro 'catchup' da DAG está definido como False para evitar re-execuções
+# de períodos históricos já populados.
+
 
 DEFAULT_ARGS = {
     "email_on_failure": True,
@@ -18,14 +29,14 @@ DEFAULT_ARGS = {
 @task
 def fetch_bitcoin_history_from_coingecko():
     """
-    Coleta dados horários do Bitcoin dos últimos 2 meses e substitui os dados
-    na tabela Postgres.
+    Coleta dados horários do Bitcoin na janela do dia anterior ("yesterday")
+    e anexa na tabela Postgres.
     """
     ctx = get_current_context()
 
-    # --- LÓGICA TEMPORÁRIA: Mudar a janela de tempo para 2 meses ---
-    end_time = pendulum.now("UTC")
-    start_time = end_time.subtract(months=2)
+    # <-- LÓGICA INCREMENTAL DIÁRIA: Pega a janela de execução do Airflow.
+    end_time = ctx["data_interval_start"]
+    start_time = end_time - timedelta(days=1)
 
     print(f"[UTC] janela-alvo: {start_time} -> {end_time}")
 
@@ -38,8 +49,8 @@ def fetch_bitcoin_history_from_coingecko():
         "from": start_s,
         "to": end_s,
     }
-
-    r = requests.get(url, params=params, timeout=60) # Timeout aumentado
+    
+    r = requests.get(url, params=params, timeout=30)
     r.raise_for_status()
     payload = r.json()
     
@@ -56,27 +67,23 @@ def fetch_bitcoin_history_from_coingecko():
     df.drop(columns=["time_ms"], inplace=True)
     df.set_index("time", inplace=True)
     df.sort_index(inplace=True)
-
+    
     print(df.head(10).to_string())
-
+    
     hook = PostgresHook(postgres_conn_id="postgres")
-
-    # --- LÓGICA TEMPORÁRIA: Limpar a tabela antes de inserir ---
-    table_name = "bitcoin_history_guilherme"
-    print(f"Limpando dados antigos da tabela '{table_name}'...")
-    hook.run(f"DELETE FROM {table_name};")
-    print("Tabela limpa. Carregando novos dados...")
-
     engine = hook.get_sqlalchemy_engine()
-    df.to_sql(table_name, con=engine, if_exists="append", index=True)
-    print(f"Carregados {len(df)} registros na tabela '{table_name}'.")
+    
+    # <-- LÓGICA DE CARGA: Apenas anexa os novos dados.
+    df.to_sql("bitcoin_history_guilherme", con=engine, if_exists="append", index=True)
+    # Criei uma tabela de nom "_Guilherme", com maiúsucula, e ela não funcionou. Ao criar com minúscula o Looker Studio leu a tabela normalmente.
+    print(f"Carregados {len(df)} novos registros.")
 
 
 @dag(
     default_args=DEFAULT_ARGS,
-    schedule="0 0 * * *",  # diário à 00:00 UTC
+    schedule="0 0 * * *", # Roda todo dia à meia-noite UTC (21:00h no seu fuso)
     start_date=pendulum.datetime(2025, 9, 17, tz="UTC"),
-    catchup=True,
+    catchup=False, # <-- MUITO IMPORTANTE: Evita re-execuções de dados históricos.
     owner_links={
         "Alex Lopes": "mailto:alexlopespereira@gmail.com",
         "Open in Cloud IDE": "https://cloud.astronomer.io/...",
