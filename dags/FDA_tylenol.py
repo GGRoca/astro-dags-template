@@ -8,7 +8,7 @@ import pandas as pd
 
 # ----------------------- Configurações -----------------------
 GCP_PROJECT = "enap-aula1-cd"
-BQ_DATASET = "FDA_API"                 # << mudou para o novo dataset
+BQ_DATASET = "openfda_events"         
 BQ_TABLE = "acetaminophen_daily"       # tabela final (sem partição)
 GCP_CONN_ID = "google_cloud_default"
 
