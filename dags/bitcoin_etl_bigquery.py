@@ -31,12 +31,17 @@ def fetch_and_to_gbq():
     via pandas.DataFrame.to_gbq()
     """
     ctx = get_current_context()
-
+ 
     # "Yesterday" window: [data_interval_start - 1 day, data_interval_start)
-    end_time = ctx["data_interval_start"]
-    start_time = end_time - timedelta(days=1)
-    print(f"[UTC] target window: {start_time} -> {end_time}")
+    # end_time = ctx["data_interval_start"]
+    # start_time = end_time - timedelta(days=1)
+ 
+    # MODIFICAÇÃO: Adicione estas linhas para buscar os últimos 2 meses
+    end_time = pendulum.now("UTC")
+    start_time = end_time.subtract(months=2) # Ou use days=60
 
+    print(f"[UTC] target window: {start_time} -> {end_time}")
+ 
     start_s = int(start_time.timestamp())   # CoinGecko expects seconds
     end_s   = int(end_time.timestamp())
 
